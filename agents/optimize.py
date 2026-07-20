@@ -1,61 +1,79 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 
-app = FastAPI(title="Intervention Optimization Agent", description="Member 2: Recommends best actions to reduce pollution.")
+app = FastAPI(title="Intervention Optimization Agent")
 
-# --- INPUT MODELS (Based on your exact JSON file) ---
-class OptimizationContext(BaseModel):
-    zone_id: str
-    is_anomaly_detected: bool
+# 1. Define the models that match Member 1's JSON exactly
+class CurrentAirQuality(BaseModel):
+    aqi: int
 
-class SimulationInputs(BaseModel):
-    traffic_light_adjustment_seconds: int
-    suggested_flow_rate: float
-    priority_level: str
+class Weather(BaseModel):
+    temperature: float
+    humidity: float
+    wind_speed: float
+    wind_direction: str
 
-class AnalyticalMetrics(BaseModel):
-    predicted_pm_reduction_percent: float
-    congestion_index: float
+class SourceContribution(BaseModel):
+    source: str
+    contribution_percent: float
 
-class SimulationInstructions(BaseModel):
-    run_mode: str
-    duration_cycles: int
+class SourceAttribution(BaseModel):
+    dominant_source: str
+    source_contributions: List[SourceContribution]
 
-# Main Input Request matching your JSON
-class TeamOptimizationRequest(BaseModel):
-    request_id: str
-    optimization_context: OptimizationContext
-    simulation_inputs: SimulationInputs
-    analytical_metrics: AnalyticalMetrics
-    simulation_instructions: SimulationInstructions
+class Hotspot(BaseModel):
+    location: str
+    predicted_aqi: int
+    risk_level: str
 
-# --- OUTPUT MODEL ---
-class TeamOptimizationResponse(BaseModel):
-    request_id: str
-    zone_id: str
-    action_taken: str
-    final_traffic_adjustment: int
-    status: str
+class HotspotPrediction(BaseModel):
+    highest_risk_hotspot: Hotspot
+    all_hotspots: List[Hotspot]
 
-@app.post("/optimize", response_model=TeamOptimizationResponse)
-def run_team_optimization(data: TeamOptimizationRequest):
-    # Optimization Logic
-    action = "Monitor only, normal flow"
-    final_adjustment = data.simulation_inputs.traffic_light_adjustment_seconds
-    
-    # Logic based on metrics
-    if data.optimization_context.is_anomaly_detected:
-        if data.analytical_metrics.congestion_index > 0.75:
-            action = "CRITICAL: Heavy congestion. Maximizing green light!"
-            final_adjustment += 15  
-        else:
-            action = "WARNING: Adjust traffic flow to reduce PM levels"
-            
-    return TeamOptimizationResponse(
-        request_id=data.request_id,
-        zone_id=data.optimization_context.zone_id,
-        action_taken=action,
-        final_traffic_adjustment=final_adjustment,
-        status="Optimization Completed & Sent to Simulation"
-    )
+class ComplianceRisk(BaseModel):
+    risk_score: int
+    risk_level: str
+
+# This is the "Data Package" Member 1 sends to you
+class SourceIntelligenceData(BaseModel):
+    agent_name: str
+    city: str
+    timestamp: str
+    current_air_quality: CurrentAirQuality
+    weather: Weather
+    source_attribution: SourceAttribution
+    hotspot_prediction: HotspotPrediction
+    compliance_risk: ComplianceRisk
+
+# 2. The API Endpoint that Member 1 will call
+@app.post("/optimize")
+async def process_pollution_data(data: SourceIntelligenceData):
+    try:
+        # Now you can use dot notation like data.city, data.current_air_quality.aqi
+        aqi = data.current_air_quality.aqi
+        dominant = data.source_attribution.dominant_source
+        target = data.hotspot_prediction.highest_risk_hotspot.location
+
+        # Logic to decide the action
+        action = "Monitor normal flow"
+        adjustment = 0
+        
+        if aqi > 150:
+            if dominant == "Traffic":
+                action = f"Reduce traffic in {target}"
+                adjustment = 20
+            else:
+                action = "Deploy industrial cleaning trucks"
+
+        # Return the "Decision Package" for Member 3
+        return {
+            "status": "Optimization Completed",
+            "decision": {
+                "action": action,
+                "adjustment_seconds": adjustment,
+                "target_location": target
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
